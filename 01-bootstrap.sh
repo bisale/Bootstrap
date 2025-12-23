@@ -5,7 +5,7 @@ USER_NAME="ugg7"
 
 # >>> HIER ANPASSEN: RAW Basis-URL deines Repos (Beispiel unten)
 # REPO_RAW="https://raw.githubusercontent.com/<OWNER>/<REPO>/main"
-REPO_RAW="https://raw.githubusercontent.com/OWNER/REPO/main"
+REPO_RAW="https://raw.githubusercontent.com/bisale/Bootstrap/main"
 
 # Welche Skripte sollen geladen werden?
 # (Passe die Dateinamen an dein Repo an.)
