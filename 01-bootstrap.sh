@@ -7,7 +7,7 @@ DEFAULT_USER="ugg7"
 # >>> HIER DEIN GITHUB RAW BASIS-PFAD <<<
 # Beispiel:
 # REPO_RAW="https://raw.githubusercontent.com/meinname/debian-bootstrap/main"
-REPO_RAW="https://raw.githubusercontent.com/OWNER/REPO/main"
+REPO_RAW="https://raw.githubusercontent.com/bisale/Bootstrap/main"
 
 SCRIPT2="02-install-update-script.sh"
 SCRIPT3="03-setup.sh"
