@@ -124,7 +124,6 @@ set_hostname_fqdn_systemwide() {
   fi
 
   # /etc/hosts anpassen: 127.0.1.1 fqdn hostname
-  # Bestehende 127.0.1.1 Zeile ersetzen oder hinzufügen
   if grep -qE '^\s*127\.0\.1\.1\s+' /etc/hosts; then
     sed -i -E "s|^\s*127\.0\.1\.1\s+.*|127.0.1.1\t${new_fqdn} ${new_host}|" /etc/hosts
   else
@@ -141,7 +140,6 @@ set_locale_systemwide() {
   apt-get update -y
   apt-get install -y locales
 
-  # locale in /etc/locale.gen aktivieren
   if grep -qE "^\s*#?\s*${locale}\s+UTF-8\s*$" /etc/locale.gen; then
     sed -i -E "s|^\s*#\s*(${locale}\s+UTF-8\s*)$|\1|" /etc/locale.gen
   else
@@ -150,7 +148,6 @@ set_locale_systemwide() {
 
   locale-gen "${locale}" >/dev/null
 
-  # /etc/default/locale setzen
   cat > /etc/default/locale <<EOF
 LANG=${locale}
 LC_ALL=${locale}
@@ -176,7 +173,6 @@ get_gateway() {
 
 get_dns_list_compact() {
   if command -v resolvectl >/dev/null 2>&1; then
-    # Sammle DNS Server aus resolvectl status
     resolvectl status 2>/dev/null | awk '/DNS Servers:/ {for (i=3;i<=NF;i++) print $i}' | paste -sd' ' - || true
     return 0
   fi
@@ -196,7 +192,6 @@ cidr_to_netmask() {
 }
 
 get_disk_total() {
-  # bevorzugt Root-FS Größe
   df -h --total 2>/dev/null | awk '/total/ {print $2}' | tail -n1
 }
 
@@ -204,12 +199,14 @@ get_ram_total() {
   free -h 2>/dev/null | awk '/Mem:/ {print $2}'
 }
 
+# Track whether user existed / created
+USER_CREATED_STATUS="unbekannt"
+
 # ---------- Start ----------
 echo "[0/9] Sprache/Locale (Standard: Deutsch)"
 DEFAULT_LOCALE="de_DE.UTF-8"
 read -rp "Sprache/Locale [${DEFAULT_LOCALE}] (z.B. de_DE.UTF-8 oder en_US.UTF-8): " LOCALE_CHOICE
 LOCALE_CHOICE="$(echo "${LOCALE_CHOICE:-$DEFAULT_LOCALE}" | xargs)"
-
 if [[ -n "${LOCALE_CHOICE}" ]]; then
   set_locale_systemwide "${LOCALE_CHOICE}"
 fi
@@ -221,10 +218,7 @@ CURRENT_HOST="$(hostname 2>/dev/null || true)"
 SUGGEST_FQDN="${CURRENT_FQDN:-$CURRENT_HOST}"
 
 echo "Aktuell: Hostname='${CURRENT_HOST}', FQDN='${CURRENT_FQDN:-unbekannt}'"
-read -rp "Soll Hostname/FQDN geändert werden? (y/N): " chhn
-chhn="${chhn,,}"
-
-if [[ "${chhn}" == "y" || "${chhn}" == "yes" ]]; then
+if yesno "Soll Hostname/FQDN geändert werden?" "n"; then
   read -rp "Neuer FQDN [${SUGGEST_FQDN}]: " NEW_FQDN
   NEW_FQDN="$(echo "${NEW_FQDN:-$SUGGEST_FQDN}" | xargs)"
   if [[ -n "${NEW_FQDN}" ]]; then
@@ -312,83 +306,100 @@ else
   echo " - DHCP bleibt aktiv (keine DNS-Änderung)."
 fi
 
+# ---------- SSH / User Safety ----------
 echo
 echo "[8/9] SSH-Schlüssel Routine für ${USER_NAME}"
-if ! id "${USER_NAME}" >/dev/null 2>&1; then
-  echo "Benutzer ${USER_NAME} existiert nicht. Bitte zuerst Skript 1 ausführen."
-  exit 1
-fi
 
-USER_HOME="$(getent passwd "${USER_NAME}" | cut -d: -f6)"
-SSH_DIR="${USER_HOME}/.ssh"
-KEY_PATH="${SSH_DIR}/id_ed25519"
-
-mkdir -p "${SSH_DIR}"
-chown -R "${USER_NAME}:${USER_NAME}" "${SSH_DIR}"
-chmod 700 "${SSH_DIR}"
-
-if [[ "${GENKEY}" == "true" ]]; then
-  if ! command -v ssh-keygen >/dev/null 2>&1; then
-    apt-get install -y openssh-client
-  fi
-
-  if [[ -f "${KEY_PATH}" ]]; then
-    echo " - Key existiert bereits: ${KEY_PATH}"
-  else
-    echo " - Erzeuge ed25519 Key für ${USER_NAME} (ohne Passphrase)..."
-    sudo -u "${USER_NAME}" ssh-keygen -t ed25519 -f "${KEY_PATH}" -N "" -C "${USER_NAME}@$(hostname)"
-    chmod 600 "${KEY_PATH}"
-    chmod 644 "${KEY_PATH}.pub"
-    chown "${USER_NAME}:${USER_NAME}" "${KEY_PATH}" "${KEY_PATH}.pub"
-  fi
-
-  echo
-  echo "Privater Schlüssel liegt hier:"
-  echo "  ${KEY_PATH}"
-  echo
-  echo "Reminder: Public-Key auf Ziel/Server in ~/.ssh/authorized_keys eintragen."
+if id "${USER_NAME}" >/dev/null 2>&1; then
+  USER_CREATED_STATUS="vorhanden"
 else
-  echo " - OK, kein Key erzeugt."
-  echo "Wenn du bereits einen Key hochgeladen hast, stelle sicher:"
-  echo "  - ${SSH_DIR}/authorized_keys existiert und gehört ${USER_NAME}:${USER_NAME}"
-  echo "  - Rechte: ~/.ssh = 700, authorized_keys = 600"
+  USER_CREATED_STATUS="NICHT vorhanden"
+  echo "⚠ Benutzer ${USER_NAME} existiert nicht."
+  if yesno "Soll der Benutzer ${USER_NAME} jetzt angelegt werden?" "n"; then
+    useradd -m -s /bin/bash "${USER_NAME}"
+    echo "Setze jetzt ein Passwort für ${USER_NAME}:"
+    passwd "${USER_NAME}"
+    USER_CREATED_STATUS="neu angelegt"
+    echo " - Benutzer ${USER_NAME} wurde angelegt."
+  else
+    echo " - SSH-Key Einrichtung wird übersprungen."
+  fi
 fi
 
-echo
-echo "Teste JETZT bitte den SSH-Login (falls SSH genutzt wird)."
-read -rp "ENTER drücken, sobald du getestet hast (oder STRG+C zum Abbrechen) ... " _
+if id "${USER_NAME}" >/dev/null 2>&1; then
+  USER_HOME="$(getent passwd "${USER_NAME}" | cut -d: -f6)"
+  SSH_DIR="${USER_HOME}/.ssh"
+  KEY_PATH="${SSH_DIR}/id_ed25519"
 
-if yesno "Soll ich sshd_config für Key-only Login anpassen und ssh/sshd neu laden?" "n"; then
-  if ! dpkg -s openssh-server >/dev/null 2>&1; then
-    echo "openssh-server ist nicht installiert. Installiere..."
-    apt-get install -y openssh-server
-  fi
+  mkdir -p "${SSH_DIR}"
+  chown -R "${USER_NAME}:${USER_NAME}" "${SSH_DIR}"
+  chmod 700 "${SSH_DIR}"
 
-  SSHD_CONFIG="/etc/ssh/sshd_config"
-  cp -a "${SSHD_CONFIG}" "${SSHD_CONFIG}.bak.$(date +%Y%m%d-%H%M%S)"
-
-  set_sshd_option() {
-    local key="$1" value="$2"
-    if grep -qE "^[#[:space:]]*${key}[[:space:]]+" "${SSHD_CONFIG}"; then
-      sed -i -E "s|^[#[:space:]]*${key}[[:space:]]+.*|${key} ${value}|g" "${SSHD_CONFIG}"
-    else
-      echo "${key} ${value}" >> "${SSHD_CONFIG}"
+  if [[ "${GENKEY}" == "true" ]]; then
+    if ! command -v ssh-keygen >/dev/null 2>&1; then
+      apt-get install -y openssh-client
     fi
-  }
 
-  set_sshd_option "PubkeyAuthentication" "yes"
-  set_sshd_option "PasswordAuthentication" "no"
-  set_sshd_option "ChallengeResponseAuthentication" "no"
+    if [[ -f "${KEY_PATH}" ]]; then
+      echo " - Key existiert bereits: ${KEY_PATH}"
+    else
+      echo " - Erzeuge ed25519 Key für ${USER_NAME} (ohne Passphrase)..."
+      sudo -u "${USER_NAME}" ssh-keygen -t ed25519 -f "${KEY_PATH}" -N "" -C "${USER_NAME}@$(hostname)"
+      chmod 600 "${KEY_PATH}"
+      chmod 644 "${KEY_PATH}.pub"
+      chown "${USER_NAME}:${USER_NAME}" "${KEY_PATH}" "${KEY_PATH}.pub"
+    fi
 
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl reload ssh || systemctl reload sshd || systemctl restart ssh || systemctl restart sshd
+    echo
+    echo "Privater Schlüssel:"
+    echo "  ${KEY_PATH}"
+    echo
+    echo "Reminder: Public-Key auf Ziel/Server in ~/.ssh/authorized_keys eintragen."
   else
-    service ssh reload || service ssh restart || true
+    echo " - Kein Key erzeugt (ausgewählt)."
+    echo "Wenn du bereits einen Key hochgeladen hast, stelle sicher:"
+    echo "  - ${SSH_DIR}/authorized_keys existiert und gehört ${USER_NAME}:${USER_NAME}"
+    echo "  - Rechte: ~/.ssh = 700, authorized_keys = 600"
   fi
 
-  echo " - SSH/sshd neu geladen."
+  echo
+  echo "Teste JETZT bitte den SSH-Login (falls SSH genutzt wird)."
+  read -rp "ENTER drücken, sobald du getestet hast (oder STRG+C zum Abbrechen) ... " _
+
+  if yesno "Soll ich sshd_config für Key-only Login anpassen und ssh/sshd neu laden?" "n"; then
+    if ! dpkg -s openssh-server >/dev/null 2>&1; then
+      echo "openssh-server ist nicht installiert. Installiere..."
+      apt-get install -y openssh-server
+    fi
+
+    SSHD_CONFIG="/etc/ssh/sshd_config"
+    cp -a "${SSHD_CONFIG}" "${SSHD_CONFIG}.bak.$(date +%Y%m%d-%H%M%S)"
+
+    set_sshd_option() {
+      local key="$1" value="$2"
+      if grep -qE "^[#[:space:]]*${key}[[:space:]]+" "${SSHD_CONFIG}"; then
+        sed -i -E "s|^[#[:space:]]*${key}[[:space:]]+.*|${key} ${value}|g" "${SSHD_CONFIG}"
+      else
+        echo "${key} ${value}" >> "${SSHD_CONFIG}"
+      fi
+    }
+
+    set_sshd_option "PubkeyAuthentication" "yes"
+    set_sshd_option "PasswordAuthentication" "no"
+    set_sshd_option "ChallengeResponseAuthentication" "no"
+
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl reload ssh || systemctl reload sshd || systemctl restart ssh || systemctl restart sshd
+    else
+      service ssh reload || service ssh restart || true
+    fi
+
+    echo " - SSH/sshd neu geladen."
+  else
+    echo "OK, keine automatische SSH-Härtung vorgenommen."
+  fi
 else
-  echo "OK, keine automatische SSH-Härtung vorgenommen."
+  echo " - Benutzer ${USER_NAME} existiert nicht. SSH-Abschnitt vollständig übersprungen."
 fi
 
 echo
@@ -417,7 +428,7 @@ EOF
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
   if getent group docker >/dev/null 2>&1; then
-    usermod -aG docker "${USER_NAME}" || true
+    usermod -aG docker "${USER_NAME}" 2>/dev/null || true
     echo " - ${USER_NAME} zur docker-Gruppe hinzugefügt (wirksam nach neuem Login)."
   fi
 
@@ -463,6 +474,7 @@ echo "DNS             : ${DNS_LIST:--}"
 echo "Sprache/Locale  : ${LANGUAGE:--}"
 echo "HDD Gesamt      : ${DISK_TOTAL:--}"
 echo "RAM Gesamt      : ${RAM_TOTAL:--}"
+echo "Benutzer ugg7   : ${USER_CREATED_STATUS}"
 echo "================================================"
 echo
 echo "Fertig."
