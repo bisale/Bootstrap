@@ -17,7 +17,6 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 yesno() {
-  # usage: yesno "Frage" "default" (default y|n)
   local prompt="$1"
   local def="${2:-n}"
   local ans
@@ -40,7 +39,7 @@ apt-get update -y
 apt-get install -y sudo curl ca-certificates
 
 # =========================================================
-# Proxmox/KVM/QEMU Check -> qemu-guest-agent (optional)
+# Proxmox / KVM / QEMU Detection → qemu-guest-agent
 # =========================================================
 echo
 echo "[2/7] Proxmox/KVM/QEMU-Check (qemu-guest-agent)"
@@ -50,43 +49,52 @@ if command -v systemd-detect-virt >/dev/null 2>&1; then
   VIRT="$(systemd-detect-virt 2>/dev/null || true)"
 fi
 
-# In Proxmox-VMs ist es meistens kvm oder qemu.
-# In Containern (LXC/Docker) macht qemu-guest-agent keinen Sinn -> überspringen.
 if [[ "$VIRT" == "kvm" || "$VIRT" == "qemu" ]]; then
-  echo "Virtualisierung erkannt: $VIRT (typisch für Proxmox/QEMU/KVM-VMs)."
+  echo "Virtualisierung erkannt: $VIRT (typisch für Proxmox/QEMU/KVM)."
   if yesno "Soll qemu-guest-agent installiert werden?" "y"; then
-    apt-get update -y
     apt-get install -y qemu-guest-agent
-
-    # Falls systemd vorhanden, Agent aktivieren/starten
     if command -v systemctl >/dev/null 2>&1; then
-      systemctl enable --now qemu-guest-agent 2>/dev/null || true
+      systemctl enable --now qemu-guest-agent || true
     fi
-
     echo " - qemu-guest-agent installiert."
   else
     echo " - qemu-guest-agent übersprungen."
   fi
 elif [[ "$VIRT" == "lxc" || "$VIRT" == "docker" || "$VIRT" == "container" ]]; then
-  echo "Container erkannt ($VIRT) -> qemu-guest-agent wird nicht angeboten."
+  echo "Container erkannt ($VIRT) → qemu-guest-agent wird nicht angeboten."
 else
-  echo "Keine eindeutige VM-Erkennung (VIRT='$VIRT')."
-  if yesno "Läuft das System auf Proxmox/QEMU/KVM und soll qemu-guest-agent installiert werden?" "n"; then
-    apt-get update -y
+  echo "Keine eindeutige Virtualisierung erkannt."
+  if yesno "Läuft das System auf Proxmox/KVM und soll qemu-guest-agent installiert werden?" "n"; then
     apt-get install -y qemu-guest-agent
     if command -v systemctl >/dev/null 2>&1; then
-      systemctl enable --now qemu-guest-agent 2>/dev/null || true
+      systemctl enable --now qemu-guest-agent || true
     fi
     echo " - qemu-guest-agent installiert."
-  else
-    echo " - qemu-guest-agent übersprungen."
   fi
 fi
-# =========================================================
 
+# =========================================================
+# Benutzer
+# =========================================================
 echo
 read -rp "Soll ein neuer Benutzer angelegt werden? (y/N): " create_user
 create_user="${create_user,,}"
+
+# 🔑 SSH Hinweis
+echo
+echo "🔑 Hinweis zu SSH-Schlüsseln:"
+echo "  Du kannst auf diesem Gastsystem einen SSH-Schlüssel erzeugen"
+echo "  und den Public-Key dann auf dein Host-System oder andere Server übertragen."
+echo
+echo "  Schlüssel erzeugen:"
+echo "    ssh-keygen -t ed25519"
+echo
+echo "  Public-Key anzeigen:"
+echo "    cat /home/ugg7/.ssh/id_ed25519.pub"
+echo
+echo "  Key auf einen anderen Rechner kopieren:"
+echo "    ssh-copy-id user@host"
+echo
 
 USER_NAME=""
 
@@ -116,6 +124,9 @@ else
   echo "Kein Benutzer wird angelegt."
 fi
 
+# =========================================================
+# Skripte laden & ausführen
+# =========================================================
 echo
 read -rp "Sollen Skript 2 und 3 von GitHub geladen werden? (y/N): " load_scripts
 load_scripts="${load_scripts,,}"
