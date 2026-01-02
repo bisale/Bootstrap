@@ -4,9 +4,7 @@ set -euo pipefail
 # Vorschlagsname
 DEFAULT_USER="ugg7"
 
-# >>> HIER DEIN GITHUB RAW BASIS-PFAD <<<
-# Beispiel:
-# REPO_RAW="https://raw.githubusercontent.com/meinname/debian-bootstrap/main"
+# GitHub RAW Basis-Pfad
 REPO_RAW="https://raw.githubusercontent.com/bisale/Bootstrap/main"
 
 SCRIPT2="02-install-update-script.sh"
@@ -18,9 +16,73 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-echo "[1/6] System vorbereiten"
+yesno() {
+  # usage: yesno "Frage" "default" (default y|n)
+  local prompt="$1"
+  local def="${2:-n}"
+  local ans
+
+  if [[ "$def" == "y" ]]; then
+    read -rp "${prompt} (Y/n): " ans
+    ans="${ans,,}"
+    [[ -z "$ans" ]] && ans="y"
+  else
+    read -rp "${prompt} (y/N): " ans
+    ans="${ans,,}"
+    [[ -z "$ans" ]] && ans="n"
+  fi
+
+  [[ "$ans" == "y" || "$ans" == "yes" ]]
+}
+
+echo "[1/7] System vorbereiten"
 apt-get update -y
 apt-get install -y sudo curl ca-certificates
+
+# =========================================================
+# Proxmox/KVM/QEMU Check -> qemu-guest-agent (optional)
+# =========================================================
+echo
+echo "[2/7] Proxmox/KVM/QEMU-Check (qemu-guest-agent)"
+
+VIRT="unknown"
+if command -v systemd-detect-virt >/dev/null 2>&1; then
+  VIRT="$(systemd-detect-virt 2>/dev/null || true)"
+fi
+
+# In Proxmox-VMs ist es meistens kvm oder qemu.
+# In Containern (LXC/Docker) macht qemu-guest-agent keinen Sinn -> überspringen.
+if [[ "$VIRT" == "kvm" || "$VIRT" == "qemu" ]]; then
+  echo "Virtualisierung erkannt: $VIRT (typisch für Proxmox/QEMU/KVM-VMs)."
+  if yesno "Soll qemu-guest-agent installiert werden?" "y"; then
+    apt-get update -y
+    apt-get install -y qemu-guest-agent
+
+    # Falls systemd vorhanden, Agent aktivieren/starten
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl enable --now qemu-guest-agent 2>/dev/null || true
+    fi
+
+    echo " - qemu-guest-agent installiert."
+  else
+    echo " - qemu-guest-agent übersprungen."
+  fi
+elif [[ "$VIRT" == "lxc" || "$VIRT" == "docker" || "$VIRT" == "container" ]]; then
+  echo "Container erkannt ($VIRT) -> qemu-guest-agent wird nicht angeboten."
+else
+  echo "Keine eindeutige VM-Erkennung (VIRT='$VIRT')."
+  if yesno "Läuft das System auf Proxmox/QEMU/KVM und soll qemu-guest-agent installiert werden?" "n"; then
+    apt-get update -y
+    apt-get install -y qemu-guest-agent
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl enable --now qemu-guest-agent 2>/dev/null || true
+    fi
+    echo " - qemu-guest-agent installiert."
+  else
+    echo " - qemu-guest-agent übersprungen."
+  fi
+fi
+# =========================================================
 
 echo
 read -rp "Soll ein neuer Benutzer angelegt werden? (y/N): " create_user
@@ -60,7 +122,7 @@ load_scripts="${load_scripts,,}"
 
 if [[ "${load_scripts}" == "y" || "${load_scripts}" == "yes" ]]; then
   echo
-  echo "[2/6] Lade Skripte nach ${DEST_DIR}"
+  echo "[6/7] Lade Skripte nach ${DEST_DIR}"
   mkdir -p "${DEST_DIR}"
 
   for f in "${SCRIPT2}" "${SCRIPT3}"; do
@@ -76,11 +138,11 @@ if [[ "${load_scripts}" == "y" || "${load_scripts}" == "yes" ]]; then
 
   if [[ "${run_scripts}" == "y" || "${run_scripts}" == "yes" ]]; then
     echo
-    echo "[3/6] Starte Skript 2"
+    echo "[7/7] Starte Skript 2"
     bash "${DEST_DIR}/${SCRIPT2}"
 
     echo
-    echo "[4/6] Starte Skript 3"
+    echo "Starte Skript 3"
     bash "${DEST_DIR}/${SCRIPT3}"
 
     echo
