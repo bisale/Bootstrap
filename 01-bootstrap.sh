@@ -4,11 +4,14 @@ set -euo pipefail
 # Vorschlagsname
 DEFAULT_USER="ugg7"
 
-# GitHub RAW Basis-Pfad
+# GitHub RAW Basis-Pfad.
+# Sicherheitshinweis:
+# Für produktive Systeme ist ein festes Release-Tag oder ein Commit-Hash sicherer als "main".
 REPO_RAW="https://raw.githubusercontent.com/bisale/Bootstrap/main"
 
 SCRIPT2="02-install-update-script.sh"
 SCRIPT3="03-setup.sh"
+SHA256_FILE="SHA256SUMS"
 DEST_DIR="/root/bootstrap-scripts"
 
 if [[ $EUID -ne 0 ]]; then
@@ -34,9 +37,39 @@ yesno() {
   [[ "$ans" == "y" || "$ans" == "yes" ]]
 }
 
+download_file() {
+  local url="$1"
+  local dest="$2"
+
+  echo " - Lade ${url}"
+  curl -fsSL --proto '=https' --tlsv1.2 "${url}" -o "${dest}"
+}
+
+verify_sha256_from_manifest() {
+  local manifest="$1"
+  local file="$2"
+  local basename_file
+  basename_file="$(basename "$file")"
+
+  if [[ ! -s "$manifest" ]]; then
+    echo "Fehler: SHA256-Manifest fehlt oder ist leer: ${manifest}"
+    return 1
+  fi
+
+  if ! grep -E "[[:space:]]${basename_file}$|[[:space:]]\*${basename_file}$" "$manifest" >/dev/null 2>&1; then
+    echo "Fehler: Keine SHA256-Prüfsumme für ${basename_file} in ${manifest} gefunden."
+    return 1
+  fi
+
+  (
+    cd "$(dirname "$file")"
+    grep -E "[[:space:]]${basename_file}$|[[:space:]]\*${basename_file}$" "$manifest" | sha256sum -c -
+  )
+}
+
 echo "[1/7] System vorbereiten"
 apt-get update -y
-apt-get install -y sudo curl ca-certificates
+apt-get install -y sudo curl ca-certificates coreutils
 
 # =========================================================
 # Proxmox / KVM / QEMU Detection → qemu-guest-agent
@@ -80,20 +113,19 @@ echo
 read -rp "Soll ein neuer Benutzer angelegt werden? (y/N): " create_user
 create_user="${create_user,,}"
 
-# 🔑 SSH Hinweis
 echo
-echo "🔑 Hinweis zu SSH-Schlüsseln:"
-echo "  Du kannst auf diesem Gastsystem einen SSH-Schlüssel erzeugen"
-echo "  und den Public-Key dann auf dein Host-System oder andere Server übertragen."
+echo "Hinweis zu SSH-Schlüsseln:"
+echo "Du kannst auf diesem Gastsystem einen SSH-Schlüssel erzeugen"
+echo "und den Public-Key dann auf dein Host-System oder andere Server übertragen."
 echo
-echo "  Schlüssel erzeugen:"
-echo "    ssh-keygen -t ed25519"
+echo "Schlüssel erzeugen:"
+echo "  ssh-keygen -t ed25519"
 echo
-echo "  Public-Key anzeigen:"
-echo "    cat /home/ugg7/.ssh/id_ed25519.pub"
+echo "Public-Key anzeigen:"
+echo "  cat /home/${DEFAULT_USER}/.ssh/id_ed25519.pub"
 echo
-echo "  Key auf einen anderen Rechner kopieren:"
-echo "    ssh-copy-id user@host"
+echo "Key auf einen anderen Rechner kopieren:"
+echo "  ssh-copy-id user@host"
 echo
 
 USER_NAME=""
@@ -113,7 +145,6 @@ if [[ "${create_user}" == "y" || "${create_user}" == "yes" ]]; then
 
   read -rp "Soll ${USER_NAME} zur sudo-Gruppe hinzugefügt werden? (y/N): " make_sudo
   make_sudo="${make_sudo,,}"
-
   if [[ "${make_sudo}" == "y" || "${make_sudo}" == "yes" ]]; then
     usermod -aG sudo "${USER_NAME}"
     echo " - ${USER_NAME} hat jetzt sudo-Rechte."
@@ -128,6 +159,15 @@ fi
 # Skripte laden & ausführen
 # =========================================================
 echo
+echo "Sicherheitshinweis:"
+echo "Die folgenden Skripte werden aus ${REPO_RAW} geladen."
+echo "Für produktive Systeme ist ein festes Release-Tag oder ein Commit-Hash sicherer als 'main'."
+echo "Zusätzlich wird jetzt eine SHA256-Prüfung über ${SHA256_FILE} durchgeführt."
+echo
+echo "Wichtig: Lege im Repository eine Datei ${SHA256_FILE} an, z. B. mit:"
+echo "  sha256sum 02-install-update-script.sh 03-setup.sh > SHA256SUMS"
+echo
+
 read -rp "Sollen Skript 2 und 3 von GitHub geladen werden? (y/N): " load_scripts
 load_scripts="${load_scripts,,}"
 
@@ -136,11 +176,12 @@ if [[ "${load_scripts}" == "y" || "${load_scripts}" == "yes" ]]; then
   echo "[6/7] Lade Skripte nach ${DEST_DIR}"
   mkdir -p "${DEST_DIR}"
 
+  download_file "${REPO_RAW}/${SHA256_FILE}" "${DEST_DIR}/${SHA256_FILE}"
+
   for f in "${SCRIPT2}" "${SCRIPT3}"; do
-    url="${REPO_RAW}/${f}"
-    echo " - Lade ${url}"
-    curl -fsSL "${url}" -o "${DEST_DIR}/${f}"
-    chmod +x "${DEST_DIR}/${f}"
+    download_file "${REPO_RAW}/${f}" "${DEST_DIR}/${f}"
+    verify_sha256_from_manifest "${DEST_DIR}/${SHA256_FILE}" "${DEST_DIR}/${f}"
+    chmod 0755 "${DEST_DIR}/${f}"
   done
 
   echo
@@ -160,7 +201,7 @@ if [[ "${load_scripts}" == "y" || "${load_scripts}" == "yes" ]]; then
     echo "Bootstrap vollständig abgeschlossen."
   else
     echo
-    echo "Skripte wurden nur heruntergeladen."
+    echo "Skripte wurden nur heruntergeladen und erfolgreich per SHA256 geprüft."
     echo "Manuell starten mit:"
     echo "  bash ${DEST_DIR}/${SCRIPT2}"
     echo "  bash ${DEST_DIR}/${SCRIPT3}"
@@ -171,3 +212,4 @@ fi
 
 echo
 echo "Skript 1 beendet."
+
