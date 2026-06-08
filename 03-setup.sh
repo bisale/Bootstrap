@@ -1005,3 +1005,4 @@ echo "Benutzer ugg7   : ${USER_CREATED_STATUS}"
 echo "================================================"
 echo
 echo "Fertig."
+exit 0
