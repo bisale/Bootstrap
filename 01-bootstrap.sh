@@ -11,7 +11,6 @@ REPO_RAW="https://raw.githubusercontent.com/bisale/Bootstrap/main"
 
 SCRIPT2="02-install-update-script.sh"
 SCRIPT3="03-setup.sh"
-SHA256_FILE="SHA256SUMS"
 DEST_DIR="/root/bootstrap-scripts"
 
 if [[ $EUID -ne 0 ]]; then
@@ -45,26 +44,18 @@ download_file() {
   curl -fsSL --proto '=https' --tlsv1.2 "${url}" -o "${dest}"
 }
 
-verify_sha256_from_manifest() {
-  local manifest="$1"
-  local file="$2"
-  local basename_file
-  basename_file="$(basename "$file")"
-
-  if [[ ! -s "$manifest" ]]; then
-    echo "Fehler: SHA256-Manifest fehlt oder ist leer: ${manifest}"
-    return 1
+start_qemu_guest_agent() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo " - systemctl nicht vorhanden, qemu-guest-agent wurde nur installiert."
+    return 0
   fi
 
-  if ! grep -E "[[:space:]]${basename_file}$|[[:space:]]\*${basename_file}$" "$manifest" >/dev/null 2>&1; then
-    echo "Fehler: Keine SHA256-Prüfsumme für ${basename_file} in ${manifest} gefunden."
-    return 1
+  if systemctl list-unit-files qemu-guest-agent.service >/dev/null 2>&1; then
+    echo " - Starte qemu-guest-agent.service"
+    systemctl start qemu-guest-agent.service || true
+  else
+    echo " - qemu-guest-agent.service wurde nicht als systemd Unit gefunden."
   fi
-
-  (
-    cd "$(dirname "$file")"
-    grep -E "[[:space:]]${basename_file}$|[[:space:]]\*${basename_file}$" "$manifest" | sha256sum -c -
-  )
 }
 
 echo "[1/7] System vorbereiten"
@@ -86,10 +77,8 @@ if [[ "$VIRT" == "kvm" || "$VIRT" == "qemu" ]]; then
   echo "Virtualisierung erkannt: $VIRT (typisch für Proxmox/QEMU/KVM)."
   if yesno "Soll qemu-guest-agent installiert werden?" "y"; then
     apt-get install -y qemu-guest-agent
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl enable --now qemu-guest-agent || true
-    fi
-    echo " - qemu-guest-agent installiert."
+    start_qemu_guest_agent
+    echo " - qemu-guest-agent installiert/gestartet."
   else
     echo " - qemu-guest-agent übersprungen."
   fi
@@ -99,10 +88,8 @@ else
   echo "Keine eindeutige Virtualisierung erkannt."
   if yesno "Läuft das System auf Proxmox/KVM und soll qemu-guest-agent installiert werden?" "n"; then
     apt-get install -y qemu-guest-agent
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl enable --now qemu-guest-agent || true
-    fi
-    echo " - qemu-guest-agent installiert."
+    start_qemu_guest_agent
+    echo " - qemu-guest-agent installiert/gestartet."
   fi
 fi
 
@@ -162,10 +149,6 @@ echo
 echo "Sicherheitshinweis:"
 echo "Die folgenden Skripte werden aus ${REPO_RAW} geladen."
 echo "Für produktive Systeme ist ein festes Release-Tag oder ein Commit-Hash sicherer als 'main'."
-echo "Zusätzlich wird jetzt eine SHA256-Prüfung über ${SHA256_FILE} durchgeführt."
-echo
-echo "Wichtig: Lege im Repository eine Datei ${SHA256_FILE} an, z. B. mit:"
-echo "  sha256sum 02-install-update-script.sh 03-setup.sh > SHA256SUMS"
 echo
 
 read -rp "Sollen Skript 2 und 3 von GitHub geladen werden? (y/N): " load_scripts
@@ -176,11 +159,8 @@ if [[ "${load_scripts}" == "y" || "${load_scripts}" == "yes" ]]; then
   echo "[6/7] Lade Skripte nach ${DEST_DIR}"
   mkdir -p "${DEST_DIR}"
 
-  download_file "${REPO_RAW}/${SHA256_FILE}" "${DEST_DIR}/${SHA256_FILE}"
-
   for f in "${SCRIPT2}" "${SCRIPT3}"; do
     download_file "${REPO_RAW}/${f}" "${DEST_DIR}/${f}"
-    verify_sha256_from_manifest "${DEST_DIR}/${SHA256_FILE}" "${DEST_DIR}/${f}"
     chmod 0755 "${DEST_DIR}/${f}"
   done
 
@@ -201,7 +181,7 @@ if [[ "${load_scripts}" == "y" || "${load_scripts}" == "yes" ]]; then
     echo "Bootstrap vollständig abgeschlossen."
   else
     echo
-    echo "Skripte wurden nur heruntergeladen und erfolgreich per SHA256 geprüft."
+    echo "Skripte wurden nur heruntergeladen."
     echo "Manuell starten mit:"
     echo "  bash ${DEST_DIR}/${SCRIPT2}"
     echo "  bash ${DEST_DIR}/${SCRIPT3}"
@@ -212,4 +192,3 @@ fi
 
 echo
 echo "Skript 1 beendet."
-
