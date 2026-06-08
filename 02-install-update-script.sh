@@ -12,7 +12,7 @@ cat > "${TARGET}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Immer mit sudo/root laufen (fragt ggf. nach Passwort)
+# Immer mit sudo/root laufen; fragt ggf. nach Passwort.
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   echo "Dieses Skript benötigt sudo/root."
   sudo -v
@@ -34,6 +34,14 @@ echo "[update.sh] autoclean"
 apt-get autoclean -y
 
 echo "[update.sh] Fertig."
+EOF
+
+chmod 0755 "${TARGET}"
+chown root:root "${TARGET}"
+
+echo "Installiert: ${TARGET}"
+echo "Benutzung: update.sh"
+
 EOF
 
 chmod 0755 "${TARGET}"
