@@ -1,0 +1,5 @@
+3de0e7e70fbb7cc0ce7b2bbae22f9a2f807b59d60380b639ccf003e7f1934b8f  01-bootstrap.sh
+5e275dfe3065e20c3e633c276503c085daedce0fa3a1c94718dea5ea9744c53f  02-install-update-script.sh
+32b1b6560ce0f63fcbd203dd3567fb6ac253041859ba217c71ff203052ec1258  03-setup.sh
+105d97a16e03b50bbdf8f5285e6f39a974a8c61cae5cd0fdc3ebb2682e12f6ad  04-debian-release-upgrade.sh
+898f28864eac6d61a4b88bae3031be7ce7bc6569cf79aaff6707cb26950dc55b  05-caddy.sh
