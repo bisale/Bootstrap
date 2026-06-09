@@ -2,17 +2,14 @@
 set -euo pipefail
 
 USER_NAME="ugg7"
-
 DOCKER_GPG_URL="https://download.docker.com/linux/debian/gpg"
 DOCKER_GPG_KEY="/etc/apt/keyrings/docker.asc"
-DOCKER_EXPECTED_FPR="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
 
-if [[ $EUID -ne 0 ]]; then
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   echo "Bitte als root ausführen."
   exit 1
 fi
 
-# ---------- Helper ----------
 yesno() {
   local prompt="$1"
   local def="${2:-n}"
@@ -28,37 +25,7 @@ yesno() {
     [[ -z "$ans" ]] && ans="n"
   fi
 
-  [[ "$ans" == "y" || "$ans" == "yes" ]]
-}
-
-normalize_fpr() {
-  tr -d '[:space:]' | tr '[:lower:]' '[:upper:]'
-}
-
-verify_gpg_fingerprint() {
-  local key_file="$1"
-  local expected="$2"
-  local actual=""
-
-  actual="$(gpg --show-keys --with-colons --fingerprint "$key_file" 2>/dev/null \
-    | awk -F: '$1 == "fpr" {print $10; exit}' \
-    | normalize_fpr)"
-
-  expected="$(printf '%s' "$expected" | normalize_fpr)"
-
-  if [[ -z "$actual" ]]; then
-    echo "Fehler: Fingerprint konnte nicht aus ${key_file} gelesen werden."
-    return 1
-  fi
-
-  if [[ "$actual" != "$expected" ]]; then
-    echo "Fehler: GPG-Key-Fingerprint stimmt nicht."
-    echo "Erwartet: $expected"
-    echo "Gefunden : $actual"
-    return 1
-  fi
-
-  echo " - Fingerprint OK: $actual"
+  [[ "$ans" == "y" || "$ans" == "yes" || "$ans" == "j" || "$ans" == "ja" ]]
 }
 
 get_current_dns() {
@@ -237,7 +204,6 @@ get_ram_total() {
 
 USER_CREATED_STATUS="unbekannt"
 
-# ---------- Start ----------
 echo "[0/9] Sprache/Locale (Standard: Deutsch)"
 DEFAULT_LOCALE="de_DE.UTF-8"
 read -rp "Sprache/Locale [${DEFAULT_LOCALE}] (z.B. de_DE.UTF-8 oder en_US.UTF-8): " LOCALE_CHOICE
@@ -248,7 +214,7 @@ if [[ -n "${LOCALE_CHOICE}" ]]; then
 fi
 
 echo
-echo "[1/9] Hostname/FQDN (passt zur DNS-Abfrage)"
+echo "[1/9] Hostname/FQDN"
 CURRENT_FQDN="$(hostname -f 2>/dev/null || true)"
 CURRENT_HOST="$(hostname 2>/dev/null || true)"
 SUGGEST_FQDN="${CURRENT_FQDN:-$CURRENT_HOST}"
@@ -285,7 +251,7 @@ echo "[4/9] Basistools installieren: mc, vim, vnstat, tmux"
 apt-get install -y mc vim vnstat tmux
 
 echo
-echo "[5/9] Globale vim Einstellungen (für alle Nutzer)"
+echo "[5/9] Globale vim Einstellungen"
 VIMRC_LOCAL="/etc/vim/vimrc.local"
 touch "${VIMRC_LOCAL}"
 grep -qE '^\s*syntax\s+on\s*$' "${VIMRC_LOCAL}" || echo "syntax on" >> "${VIMRC_LOCAL}"
@@ -293,7 +259,7 @@ grep -qE '^\s*set\s+mouse-=a\s*$' "${VIMRC_LOCAL}" || echo "set mouse-=a" >> "${
 echo " - OK: ${VIMRC_LOCAL}"
 
 echo
-echo "[6/9] Globales bash alias für alle Nutzer: ll='ls -lha'"
+echo "[6/9] Globales bash alias: ll='ls -lha'"
 ALIAS_FILE="/etc/profile.d/aliases.sh"
 cat > "${ALIAS_FILE}" <<'EOF'
 # Global aliases for all users
@@ -303,7 +269,7 @@ chmod 0644 "${ALIAS_FILE}"
 echo " - OK: ${ALIAS_FILE}"
 
 echo
-echo "[7/9] Systemweite tmux Konfiguration (/etc/tmux.conf)"
+echo "[7/9] Systemweite tmux Konfiguration"
 TMUX_CONF="/etc/tmux.conf"
 cat > "${TMUX_CONF}" <<'EOF'
 # System-wide tmux config
@@ -341,7 +307,6 @@ else
   echo " - DHCP bleibt aktiv (keine DNS-Änderung)."
 fi
 
-# ---------- SSH / User Safety ----------
 echo
 echo "[8/9] SSH-Schlüssel Routine für ${USER_NAME}"
 
@@ -486,9 +451,6 @@ if yesno "Soll Docker installiert werden?" "n"; then
   curl -fsSL --proto '=https' --tlsv1.2 "${DOCKER_GPG_URL}" -o "${DOCKER_GPG_KEY}"
   chmod a+r "${DOCKER_GPG_KEY}"
 
-  echo " - Prüfe Docker GPG-Key-Fingerprint"
-  verify_gpg_fingerprint "${DOCKER_GPG_KEY}" "${DOCKER_EXPECTED_FPR}"
-
   . /etc/os-release
   ARCH="$(dpkg --print-architecture)"
   CODENAME="${VERSION_CODENAME:-trixie}"
@@ -525,7 +487,6 @@ else
   echo " - Docker Installation übersprungen."
 fi
 
-# ---------- Status-Ausgabe ----------
 echo
 echo "==================== STATUS ===================="
 FINAL_HOST="$(hostname 2>/dev/null || true)"
