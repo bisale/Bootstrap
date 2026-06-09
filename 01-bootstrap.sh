@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Vorschlagsname
 DEFAULT_USER="ugg7"
-
-# GitHub RAW Basis-Pfad.
-# Sicherheitshinweis:
-# Für produktive Systeme ist ein festes Release-Tag oder ein Commit-Hash sicherer als "main".
 REPO_RAW="https://raw.githubusercontent.com/bisale/Bootstrap/main"
-
-SCRIPT2="02-install-update-script.sh"
-SCRIPT3="03-setup.sh"
 DEST_DIR="/root/bootstrap-scripts"
 
-if [[ $EUID -ne 0 ]]; then
+SCRIPT1="01-bootstrap.sh"
+SCRIPT2="02-install-update-script.sh"
+SCRIPT3="03-setup.sh"
+SCRIPT4="04-debian-release-upgrade.sh"
+
+QEMU_AGENT_NOTE=""
+
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   echo "Bitte als root ausführen."
   exit 1
 fi
@@ -33,7 +32,7 @@ yesno() {
     [[ -z "$ans" ]] && ans="n"
   fi
 
-  [[ "$ans" == "y" || "$ans" == "yes" ]]
+  [[ "$ans" == "y" || "$ans" == "yes" || "$ans" == "j" || "$ans" == "ja" ]]
 }
 
 download_file() {
@@ -44,18 +43,40 @@ download_file() {
   curl -fsSL --proto '=https' --tlsv1.2 "${url}" -o "${dest}"
 }
 
-start_qemu_guest_agent() {
+enable_qemu_guest_agent_with_timeout() {
+  local timeout_seconds=30
+  local start_ts
+  local now_ts
+
   if ! command -v systemctl >/dev/null 2>&1; then
-    echo " - systemctl nicht vorhanden, qemu-guest-agent wurde nur installiert."
+    QEMU_AGENT_NOTE="systemctl ist nicht vorhanden. qemu-guest-agent wurde installiert, aber nicht per systemd aktiviert."
+    echo " - ${QEMU_AGENT_NOTE}"
     return 0
   fi
 
-  if systemctl list-unit-files qemu-guest-agent.service >/dev/null 2>&1; then
-    echo " - Starte qemu-guest-agent.service"
-    systemctl start qemu-guest-agent.service || true
-  else
-    echo " - qemu-guest-agent.service wurde nicht als systemd Unit gefunden."
-  fi
+  echo " - Versuche qemu-guest-agent per systemctl enable --now zu aktivieren."
+  echo " - Timeout: ${timeout_seconds}s"
+
+  start_ts="$(date +%s)"
+
+  while true; do
+    if systemctl enable --now qemu-guest-agent.service >/tmp/qemu-guest-agent-enable.log 2>&1; then
+      echo " - qemu-guest-agent wurde aktiviert und gestartet."
+      QEMU_AGENT_NOTE=""
+      return 0
+    fi
+
+    now_ts="$(date +%s)"
+    if (( now_ts - start_ts >= timeout_seconds )); then
+      echo " - qemu-guest-agent konnte nach ${timeout_seconds}s nicht aktiviert werden. Schritt wird übersprungen."
+      echo " - Letzte systemctl-Ausgabe:"
+      sed 's/^/   /' /tmp/qemu-guest-agent-enable.log 2>/dev/null || true
+      QEMU_AGENT_NOTE="qemu-guest-agent konnte nicht aktiviert werden. Bitte in Proxmox bei der VM den QEMU Guest Agent aktivieren und die VM danach vollständig herunterfahren/starten. Bei LXC ist qemu-guest-agent nicht nötig."
+      return 0
+    fi
+
+    sleep 3
+  done
 }
 
 echo "[1/7] System vorbereiten"
@@ -77,19 +98,18 @@ if [[ "$VIRT" == "kvm" || "$VIRT" == "qemu" ]]; then
   echo "Virtualisierung erkannt: $VIRT (typisch für Proxmox/QEMU/KVM)."
   if yesno "Soll qemu-guest-agent installiert werden?" "y"; then
     apt-get install -y qemu-guest-agent
-    start_qemu_guest_agent
-    echo " - qemu-guest-agent installiert/gestartet."
+    enable_qemu_guest_agent_with_timeout
   else
     echo " - qemu-guest-agent übersprungen."
   fi
 elif [[ "$VIRT" == "lxc" || "$VIRT" == "docker" || "$VIRT" == "container" ]]; then
   echo "Container erkannt ($VIRT) → qemu-guest-agent wird nicht angeboten."
+  QEMU_AGENT_NOTE="LXC/Container erkannt: qemu-guest-agent ist hier normalerweise nicht nötig. In Proxmox ist der QEMU Guest Agent nur für VMs relevant."
 else
   echo "Keine eindeutige Virtualisierung erkannt."
   if yesno "Läuft das System auf Proxmox/KVM und soll qemu-guest-agent installiert werden?" "n"; then
     apt-get install -y qemu-guest-agent
-    start_qemu_guest_agent
-    echo " - qemu-guest-agent installiert/gestartet."
+    enable_qemu_guest_agent_with_timeout
   fi
 fi
 
@@ -117,7 +137,7 @@ echo
 
 USER_NAME=""
 
-if [[ "${create_user}" == "y" || "${create_user}" == "yes" ]]; then
+if [[ "${create_user}" == "y" || "${create_user}" == "yes" || "${create_user}" == "j" || "${create_user}" == "ja" ]]; then
   read -rp "Benutzername [${DEFAULT_USER}]: " USER_NAME
   USER_NAME="${USER_NAME:-$DEFAULT_USER}"
 
@@ -132,7 +152,7 @@ if [[ "${create_user}" == "y" || "${create_user}" == "yes" ]]; then
 
   read -rp "Soll ${USER_NAME} zur sudo-Gruppe hinzugefügt werden? (y/N): " make_sudo
   make_sudo="${make_sudo,,}"
-  if [[ "${make_sudo}" == "y" || "${make_sudo}" == "yes" ]]; then
+  if [[ "${make_sudo}" == "y" || "${make_sudo}" == "yes" || "${make_sudo}" == "j" || "${make_sudo}" == "ja" ]]; then
     usermod -aG sudo "${USER_NAME}"
     echo " - ${USER_NAME} hat jetzt sudo-Rechte."
   else
@@ -143,38 +163,54 @@ else
 fi
 
 # =========================================================
-# Skripte laden & ausführen
+# Skripte 01-04 laden & optional ausführen
 # =========================================================
 echo
 echo "Sicherheitshinweis:"
-echo "Die folgenden Skripte werden aus ${REPO_RAW} geladen."
+echo "Die folgenden Skripte werden aus ${REPO_RAW} geladen:"
+echo " - ${SCRIPT1}"
+echo " - ${SCRIPT2}"
+echo " - ${SCRIPT3}"
+echo " - ${SCRIPT4}"
+echo "05-caddy.sh wird bewusst ignoriert."
 echo "Für produktive Systeme ist ein festes Release-Tag oder ein Commit-Hash sicherer als 'main'."
 echo
 
-read -rp "Sollen Skript 2 und 3 von GitHub geladen werden? (y/N): " load_scripts
+read -rp "Sollen Skript 1-4 von GitHub geladen werden? (y/N): " load_scripts
 load_scripts="${load_scripts,,}"
 
-if [[ "${load_scripts}" == "y" || "${load_scripts}" == "yes" ]]; then
+if [[ "${load_scripts}" == "y" || "${load_scripts}" == "yes" || "${load_scripts}" == "j" || "${load_scripts}" == "ja" ]]; then
   echo
   echo "[6/7] Lade Skripte nach ${DEST_DIR}"
   mkdir -p "${DEST_DIR}"
 
-  for f in "${SCRIPT2}" "${SCRIPT3}"; do
+  for f in "${SCRIPT1}" "${SCRIPT2}" "${SCRIPT3}" "${SCRIPT4}"; do
     download_file "${REPO_RAW}/${f}" "${DEST_DIR}/${f}"
     chmod 0755 "${DEST_DIR}/${f}"
+  done
+
+  echo
+  echo "Syntaxprüfung:"
+  for f in "${SCRIPT1}" "${SCRIPT2}" "${SCRIPT3}" "${SCRIPT4}"; do
+    if bash -n "${DEST_DIR}/${f}"; then
+      echo " - OK: ${f}"
+    else
+      echo " - FEHLER: ${f}"
+      exit 1
+    fi
   done
 
   echo
   read -rp "Sollen Skript 2 und 3 jetzt ausgeführt werden? (y/N): " run_scripts
   run_scripts="${run_scripts,,}"
 
-  if [[ "${run_scripts}" == "y" || "${run_scripts}" == "yes" ]]; then
+  if [[ "${run_scripts}" == "y" || "${run_scripts}" == "yes" || "${run_scripts}" == "j" || "${run_scripts}" == "ja" ]]; then
     echo
-    echo "[7/7] Starte Skript 2"
+    echo "[7/7] Starte Skript 2: Installation von /usr/local/bin/update.sh"
     bash "${DEST_DIR}/${SCRIPT2}"
 
     echo
-    echo "Starte Skript 3"
+    echo "Starte Skript 3: Basissetup"
     bash "${DEST_DIR}/${SCRIPT3}"
 
     echo
@@ -185,10 +221,18 @@ if [[ "${load_scripts}" == "y" || "${load_scripts}" == "yes" ]]; then
     echo "Manuell starten mit:"
     echo "  bash ${DEST_DIR}/${SCRIPT2}"
     echo "  bash ${DEST_DIR}/${SCRIPT3}"
+    echo "  bash ${DEST_DIR}/${SCRIPT4}"
   fi
 else
-  echo "Skripte 2 und 3 wurden nicht geladen."
+  echo "Skripte 1-4 wurden nicht geladen."
 fi
 
 echo
 echo "Skript 1 beendet."
+
+if [[ -n "${QEMU_AGENT_NOTE}" ]]; then
+  echo
+  echo "Hinweis qemu-guest-agent:"
+  echo "  ${QEMU_AGENT_NOTE}"
+fi
+
