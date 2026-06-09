@@ -240,4 +240,3 @@ if [[ "${rb}" == "y" || "${rb}" == "yes" || "${rb}" == "j" || "${rb}" == "ja" ]]
 else
   echo "Bitte später manuell rebooten: reboot"
 fi
-
