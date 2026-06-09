@@ -23,7 +23,7 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
 fi
 
 yesno() {
-  local prompt="$1"x
+  local prompt="$1"
   local def="${2:-y}"
   local ans
 
