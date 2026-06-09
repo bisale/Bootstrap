@@ -205,4 +205,3 @@ else
   echo "Fehler: ${RELEASE_TARGET} hat einen Syntaxfehler."
   exit 1
 fi
-
