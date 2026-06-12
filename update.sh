@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $EUID -ne 0 ]]; then
-  echo "Bitte als root ausführen."
-  exit 1
-fi
-
-TARGET="/usr/local/bin/update.sh"
-
-cat > "${TARGET}" <<'UPDATE_SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Immer mit sudo/root laufen; fragt ggf. nach Passwort.
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   echo "Dieses Skript benötigt sudo/root."
   sudo -v
@@ -116,13 +104,13 @@ fi
 
 echo
 echo "[update.sh] apt update"
-apt-get update
+apt-get update -y
 
 echo
 echo "[update.sh] Systempakete aktualisieren"
 if [[ "${UPDATE_DOCKER}" == "true" ]]; then
   echo "[update.sh] Docker-Pakete werden mit aktualisiert."
-  apt-get upgrade
+  apt-get upgrade -y
 else
   echo "[update.sh] Docker-Pakete werden vom Upgrade ausgenommen."
 
@@ -144,20 +132,20 @@ else
 
   if [[ ${#packages_to_hold[@]} -gt 0 ]]; then
     apt-mark hold "${packages_to_hold[@]}" >/dev/null
-    apt-get upgrade
+    apt-get upgrade -y
     apt-mark unhold "${packages_to_hold[@]}" >/dev/null
   else
-    apt-get upgrade
+    apt-get upgrade -y
   fi
 fi
 
 echo
 echo "[update.sh] autoremove --purge"
-apt-get autoremove --purge
+apt-get autoremove -y --purge
 
 echo
 echo "[update.sh] autoclean"
-apt-get autoclean
+apt-get autoclean -y
 
 if [[ "${UPDATE_CONTAINERS}" == "true" ]]; then
   echo
@@ -170,10 +158,3 @@ fi
 
 echo
 echo "[update.sh] Fertig."
-UPDATE_SCRIPT
-
-chmod 0755 "${TARGET}"
-chown root:root "${TARGET}"
-
-echo "Installiert: ${TARGET}"
-echo "Benutzung: update.sh"
