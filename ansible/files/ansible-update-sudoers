@@ -1,0 +1,4 @@
+# Erlaubt dem User 'ansible' AUSSCHLIESSLICH, update.sh mit --yes als root zu starten.
+# NOPASSWD, aber striktes Command-Matching (exakter Pfad + exakte Argumente):
+# kein "sudo su", kein "sudo bash", kein beliebiger Root-Zugriff über diesen User.
+ansible ALL=(root) NOPASSWD: /usr/local/bin/update.sh --yes

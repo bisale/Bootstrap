@@ -1,0 +1,25 @@
+---
+# EINMALIG ausführen, um die eingeschränkte sudo-Regel für update.sh auszurollen.
+#
+# Braucht beim ersten Lauf noch volle Root-Rechte, z.B.:
+#   ansible-playbook -i inventory.ini setup-restricted-sudo.yml --ask-become-pass
+# oder Verbindung direkt als root/Admin-User mit vollem sudo.
+#
+# Voraussetzung: Auf jedem Host existiert bereits ein 'ansible'-User mit
+# SSH-Key-Login (kein Passwort-Login, keine sudo-Gruppe). Danach reicht für
+# alle künftigen Läufe von update-fleet.yml ausschließlich dieser User plus
+# die hier ausgerollte, auf einen Befehl beschränkte sudo-Regel.
+
+- name: Eingeschränkte sudo-Regel für update.sh ausrollen
+  hosts: fleet
+  become: true
+  gather_facts: false
+  tasks:
+    - name: sudoers-Snippet syntaktisch prüfen und einspielen
+      ansible.builtin.copy:
+        src: files/ansible-update-sudoers
+        dest: /etc/sudoers.d/ansible-update
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"
