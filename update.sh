@@ -16,7 +16,8 @@ fi
 
 LOG_FILE="/var/log/update.sh.log"
 mkdir -p "$(dirname "${LOG_FILE}")"
-exec > >(tee -a "${LOG_FILE}") 2>&1
+# Terminal bekommt die Ausgabe inkl. Farbcodes, im Logfile werden sie rausgefiltert.
+exec > >(tee >(sed -u -r 's/\x1b\[[0-9;]*m//g' >> "${LOG_FILE}")) 2>&1
 
 echo
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') update.sh gestartet ====="
@@ -301,10 +302,15 @@ fi
 
 echo
 echo "[update.sh] Prüfe ob Reboot erforderlich ist"
+
+BOLD_RED="\033[1;31m"
+BOLD_GREEN="\033[1;32m"
+COLOR_RESET="\033[0m"
+
 if check_reboot_required; then
-  echo "[update.sh] ⚠ REBOOT ERFORDERLICH (z.B. neuer Kernel installiert, aktiv: $(uname -r))"
+  echo -e "[update.sh] ${BOLD_RED}⚠ REBOOT ERFORDERLICH (z.B. neuer Kernel installiert, aktiv: $(uname -r))${COLOR_RESET}"
 else
-  echo "[update.sh] Kein Reboot erforderlich."
+  echo -e "[update.sh] ${BOLD_GREEN}Kein Reboot erforderlich.${COLOR_RESET}"
 fi
 
 echo
