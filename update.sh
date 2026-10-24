@@ -12,6 +12,7 @@ IS_PVE=false
 UPDATE_DOCKER=false
 UPDATE_CONTAINERS=false
 HELD_BY_US=()
+UPGRADABLE_COUNT=0
 
 LOG_FILE="${LOG_FILE:-/var/log/update.sh.log}"
 SOURCES_DIR="${SOURCES_DIR:-/etc/apt/sources.list.d}"
@@ -222,14 +223,14 @@ release_docker_holds() {
 }
 
 show_apt_state() {
-  local up count
+  local up
   up="$(apt list --upgradable 2>/dev/null | tail -n +2 || true)"
   if [[ -z "${up}" ]]; then
     say "Keine Paket-Updates verfügbar."
     return 1
   fi
-  count="$(grep -c . <<<"${up}")"
-  say "${count} Paket-Update(s) verfügbar:"
+  UPGRADABLE_COUNT="$(grep -c . <<<"${up}")"
+  say "${UPGRADABLE_COUNT} Paket-Update(s) verfügbar:"
   sed 's/^/  /' <<<"${up}"
   return 0
 }
@@ -279,15 +280,19 @@ apt_step() {
   fi
 
   echo
-  say "Systempakete aktualisieren (apt upgrade)"
-  if [[ "${UPDATE_DOCKER}" != "true" ]] && command -v docker >/dev/null 2>&1; then
-    say "Docker-Pakete werden von Upgrade und Dist-Upgrade ausgenommen."
-    hold_docker_packages
-  fi
-  apt-get upgrade -y
+  if yesno "Diese ${UPGRADABLE_COUNT} Paket-Update(s) jetzt installieren?" "y"; then
+    say "Systempakete aktualisieren (apt upgrade)"
+    if [[ "${UPDATE_DOCKER}" != "true" ]] && command -v docker >/dev/null 2>&1; then
+      say "Docker-Pakete werden von Upgrade und Dist-Upgrade ausgenommen."
+      hold_docker_packages
+    fi
+    apt-get upgrade -y
 
-  dist_upgrade_step
-  release_docker_holds
+    dist_upgrade_step
+    release_docker_holds
+  else
+    say "Paket-Updates übersprungen."
+  fi
 
   echo
   local removable
