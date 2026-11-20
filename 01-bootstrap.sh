@@ -79,7 +79,48 @@ enable_qemu_guest_agent_with_timeout() {
   done
 }
 
+# Proxmox VE / PBS ohne Abo: Enterprise-Repo liefert 401 -> apt-get update bricht ab.
+fix_proxmox_enterprise_repo() {
+  local p="" f codename
+  if [[ -d /etc/pve ]] && command -v pveversion >/dev/null 2>&1; then p="pve"
+  elif command -v proxmox-backup-manager >/dev/null 2>&1; then p="pbs"
+  else return 0
+  fi
+  codename="$(. /etc/os-release; echo "${VERSION_CODENAME:-}")"
+  echo "Proxmox-Produkt erkannt (${p})."
+  yesno "Enterprise-Repo deaktivieren und ${p}-no-subscription aktivieren (ohne Abo nötig)?" "y" || return 0
+
+  mkdir -p /var/backups/update.sh
+  for f in /etc/apt/sources.list.d/${p}-enterprise.sources /etc/apt/sources.list.d/ceph.sources; do
+    [[ -f "$f" ]] && grep -qE '^Components:.*enterprise' "$f" || continue
+    cp -a "$f" "/var/backups/update.sh/$(basename "$f").$(date +%Y%m%d-%H%M%S)"
+    if grep -qE '^Enabled:' "$f"; then sed -i -E 's/^Enabled:.*/Enabled: false/' "$f"
+    else echo "Enabled: false" >> "$f"; fi
+    echo " - Deaktiviert: $f"
+  done
+  for f in /etc/apt/sources.list.d/${p}-enterprise.list /etc/apt/sources.list.d/ceph.list; do
+    [[ -f "$f" ]] && sed -i -E 's/^([[:space:]]*deb[[:space:]].*enterprise)/#\1/' "$f" && echo " - Deaktiviert: $f"
+  done
+
+  if ! grep -qsE "${p}-no-subscription" /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list; then
+    if [[ "$codename" == "bookworm" ]]; then
+      echo "deb http://download.proxmox.com/debian/${p} ${codename} ${p}-no-subscription" \
+        > "/etc/apt/sources.list.d/${p}-no-subscription.list"
+    else
+      cat > "/etc/apt/sources.list.d/${p}-no-subscription.sources" <<EOF
+Types: deb
+URIs: http://download.proxmox.com/debian/${p}
+Suites: ${codename}
+Components: ${p}-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+EOF
+    fi
+    echo " - ${p}-no-subscription Repo angelegt."
+  fi
+}
+
 echo "[1/7] System vorbereiten"
+fix_proxmox_enterprise_repo
 apt-get update -y
 apt-get install -y sudo curl ca-certificates coreutils
 
@@ -235,4 +276,3 @@ if [[ -n "${QEMU_AGENT_NOTE}" ]]; then
   echo "Hinweis qemu-guest-agent:"
   echo "  ${QEMU_AGENT_NOTE}"
 fi
-
