@@ -276,3 +276,4 @@ if [[ -n "${QEMU_AGENT_NOTE}" ]]; then
   echo "Hinweis qemu-guest-agent:"
   echo "  ${QEMU_AGENT_NOTE}"
 fi
+
